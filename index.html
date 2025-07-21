@@ -249,6 +249,20 @@
             text-align: center;
         }
         
+        .api-key-toggle {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: pointer;
+            color: #3498db;
+            font-size: 1.2em;
+        }
+        
+        .config-item {
+            position: relative;
+        }
+        
         @media (max-width: 768px) {
             .container {
                 padding: 20px;
@@ -280,20 +294,21 @@
             <div class="config-row">
                 <div class="config-item">
                     <label for="apiKey">API Key de Roboflow:</label>
-                    <input type="password" id="apiKey" placeholder="rf_xxxxx... (tu API key de Roboflow)">
+                    <input type="password" id="apiKey" value="rf_kepWpLYHGyNzX6Xv62nRoMSgmvJ2" placeholder="Tu API key de Roboflow">
+                    <span class="api-key-toggle" onclick="toggleApiKeyVisibility()">👁️</span>
                 </div>
                 <div class="config-item">
-                    <label for="modelUrl">Workspace/Proyecto:</label>
-                    <input type="text" id="modelUrl" value="ppe-detection-sh17/2" placeholder="workspace/proyecto/version">
+                    <label for="modelUrl">Workspace/Proyecto/Versión:</label>
+                    <input type="text" id="modelUrl" value="2024-whf4s/ppe-detection-sh17/2" placeholder="workspace/proyecto/version">
                 </div>
             </div>
             <div class="config-row">
                 <div class="config-item">
-                    <label for="confidence">Confianza Mínima:</label>
+                    <label for="confidence">Confianza Mínima (%):</label>
                     <input type="number" id="confidence" value="30" min="0" max="100" step="5">
                 </div>
                 <div class="config-item">
-                    <label for="overlap">Overlap Threshold:</label>
+                    <label for="overlap">Overlap Threshold (%):</label>
                     <input type="number" id="overlap" value="30" min="0" max="100" step="5">
                 </div>
             </div>
@@ -326,7 +341,7 @@
                 </div>
                 <div class="image-box">
                     <h3>Detecciones</h3>
-                    <img id="predictedImage" class="image-display">
+                    <canvas id="detectionCanvas" style="max-width: 100%; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.2);"></canvas>
                 </div>
             </div>
             
@@ -344,6 +359,20 @@
         const imageInput = document.getElementById('imageInput');
         const predictBtn = document.getElementById('predictBtn');
         const resultsSection = document.getElementById('resultsSection');
+
+        // Toggle API key visibility
+        function toggleApiKeyVisibility() {
+            const apiKeyInput = document.getElementById('apiKey');
+            const toggleIcon = document.querySelector('.api-key-toggle');
+            
+            if (apiKeyInput.type === 'password') {
+                apiKeyInput.type = 'text';
+                toggleIcon.textContent = '🙈';
+            } else {
+                apiKeyInput.type = 'password';
+                toggleIcon.textContent = '👁️';
+            }
+        }
 
         // Drag and drop functionality
         uploadArea.addEventListener('dragover', (e) => {
@@ -391,8 +420,8 @@
         async function detectPPE() {
             const apiKey = document.getElementById('apiKey').value;
             const modelUrl = document.getElementById('modelUrl').value;
-            const confidence = document.getElementById('confidence').value;
-            const overlap = document.getElementById('overlap').value;
+            const confidence = parseInt(document.getElementById('confidence').value);
+            const overlap = parseInt(document.getElementById('overlap').value);
 
             if (!apiKey) {
                 showError('Por favor ingresa tu API key de Roboflow.');
@@ -411,93 +440,55 @@
                 const base64 = await fileToBase64(selectedImage);
                 const base64Data = base64.split(',')[1]; // Remove data:image/...;base64, prefix
                 
-                // Check if it's a workflow deployment
-                const isWorkflow = modelUrl.includes('/') && !modelUrl.endsWith('/2');
-                
-                let response;
-                let url;
-                
-                if (isWorkflow) {
-                    // Workflow endpoint
-                    url = `https://serverless.roboflow.com/infer/workflows/${modelUrl.replace('/2', '')}/custom-workflow`;
-                    console.log('Making workflow request to:', url);
-                    
-                    response = await fetch(url, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            api_key: apiKey,
-                            inputs: {
-                                "image": {"type": "base64", "value": base64Data}
-                            }
-                        }),
-                        mode: 'cors'
-                    });
-                } else {
-                    // Direct model endpoint
-                    url = `https://detect.roboflow.com/${modelUrl}?api_key=${apiKey}&confidence=${confidence}&overlap=${overlap}`;
-                    console.log('Making direct model request to:', url);
-                    
-                    response = await fetch(url, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                        },
-                        body: base64Data,
-                        mode: 'cors'
-                    });
+                // Parse the model URL
+                const urlParts = modelUrl.split('/');
+                if (urlParts.length !== 3) {
+                    throw new Error('Formato de URL incorrecto. Debe ser: workspace/proyecto/version');
                 }
+                
+                const [workspace, project, version] = urlParts;
+                
+                // Construct the correct Roboflow URL
+                const url = `https://detect.roboflow.com/${workspace}/${project}/${version}`;
+                
+                console.log('Making request to:', url);
+                
+                // Make the request with the correct format
+                const response = await fetch(url + `?api_key=${apiKey}&confidence=${confidence}&overlap=${overlap}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: base64Data
+                });
 
                 console.log('Response status:', response.status);
 
                 if (!response.ok) {
                     const errorText = await response.text();
-                    console.log('Error response:', errorText);
-                    throw new Error(`Error ${response.status}: ${response.statusText} - ${errorText}`);
+                    console.error('Error response:', errorText);
+                    
+                    let errorMessage = `Error ${response.status}: `;
+                    if (response.status === 401) {
+                        errorMessage += 'API key inválida o sin permisos';
+                    } else if (response.status === 404) {
+                        errorMessage += 'Modelo no encontrado. Verifica workspace/proyecto/version';
+                    } else if (response.status === 405) {
+                        errorMessage += 'Método no permitido. El modelo puede no estar desplegado correctamente';
+                    } else {
+                        errorMessage += errorText;
+                    }
+                    throw new Error(errorMessage);
                 }
 
                 const result = await response.json();
                 console.log('API Response:', result);
                 
-                // Handle different response formats (workflow vs direct model)
-                let predictions = [];
-                let resultImage = null;
-                
-                if (result.outputs && result.outputs.length > 0) {
-                    // Workflow response format
-                    const output = result.outputs[0];
-                    predictions = output.predictions || [];
-                    resultImage = output.image;
-                } else if (result.predictions) {
-                    // Direct model response format
-                    predictions = result.predictions;
-                    resultImage = result.image;
-                }
-                
-                displayResults({ predictions, image: resultImage }, base64);
+                displayResults(result, base64);
 
             } catch (error) {
-                console.error('Detailed Error:', error);
-                
-                // More specific error messages
-                let errorMessage = 'Error en la detección: ';
-                if (error.message.includes('Failed to fetch')) {
-                    errorMessage += 'No se puede conectar con Roboflow. Verifica:\n' +
-                                  '1. Tu conexión a internet\n' +
-                                  '2. Que tu API key sea correcta\n' +
-                                  '3. Que el modelo esté desplegado\n' +
-                                  '4. Si estás usando un archivo local, súbelo a un servidor web';
-                } else if (error.message.includes('401')) {
-                    errorMessage += 'API key inválida. Verifica tu clave en app.roboflow.com/settings/api';
-                } else if (error.message.includes('404')) {
-                    errorMessage += 'Modelo no encontrado. Verifica el workspace/proyecto/versión';
-                } else {
-                    errorMessage += error.message;
-                }
-                
-                showError(errorMessage);
+                console.error('Error:', error);
+                showError(error.message);
                 hideLoading();
             }
         }
@@ -511,6 +502,54 @@
             });
         }
 
+        function drawDetections(imageElement, predictions) {
+            const canvas = document.getElementById('detectionCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas size to match image
+            canvas.width = imageElement.naturalWidth;
+            canvas.height = imageElement.naturalHeight;
+            
+            // Draw the image
+            ctx.drawImage(imageElement, 0, 0);
+            
+            // Draw detections
+            predictions.forEach(prediction => {
+                // Calculate box coordinates
+                const x = prediction.x - prediction.width / 2;
+                const y = prediction.y - prediction.height / 2;
+                
+                // Draw bounding box
+                ctx.strokeStyle = getColorForClass(prediction.class);
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x, y, prediction.width, prediction.height);
+                
+                // Draw label background
+                ctx.fillStyle = getColorForClass(prediction.class);
+                const text = `${prediction.class} ${Math.round(prediction.confidence * 100)}%`;
+                const textWidth = ctx.measureText(text).width;
+                ctx.fillRect(x, y - 25, textWidth + 10, 25);
+                
+                // Draw label text
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 16px Arial';
+                ctx.fillText(text, x + 5, y - 7);
+            });
+        }
+
+        function getColorForClass(className) {
+            const colors = {
+                'helmet': '#e74c3c',
+                'person': '#3498db',
+                'vest': '#2ecc71',
+                'mask': '#f39c12',
+                'gloves': '#9b59b6',
+                'goggles': '#1abc9c',
+                'boots': '#34495e'
+            };
+            return colors[className.toLowerCase()] || '#95a5a6';
+        }
+
         function displayResults(result, originalBase64) {
             hideLoading();
             
@@ -518,40 +557,62 @@
             resultsSection.style.display = 'block';
             
             // Display original image
-            document.getElementById('originalImage').src = originalBase64;
+            const originalImg = document.getElementById('originalImage');
+            originalImg.src = originalBase64;
             
-            // Display predicted image (if available)
-            if (result.image) {
-                document.getElementById('predictedImage').src = `data:image/jpeg;base64,${result.image}`;
-            } else {
-                // If no annotated image is returned, show original
-                document.getElementById('predictedImage').src = originalBase64;
-            }
+            // Wait for image to load before drawing detections
+            originalImg.onload = () => {
+                if (result.predictions && result.predictions.length > 0) {
+                    drawDetections(originalImg, result.predictions);
+                } else {
+                    // If no detections, just show the original image in canvas
+                    const canvas = document.getElementById('detectionCanvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = originalImg.naturalWidth;
+                    canvas.height = originalImg.naturalHeight;
+                    ctx.drawImage(originalImg, 0, 0);
+                }
+            };
             
             // Display detection results
             const detectionList = document.getElementById('detectionList');
             detectionList.innerHTML = '';
             
             if (result.predictions && result.predictions.length > 0) {
-                result.predictions.forEach((prediction, index) => {
-                    const li = document.createElement('li');
-                    li.className = 'detection-item';
-                    li.innerHTML = `
-                        <div>
-                            <span class="class">${prediction.class}</span>
-                            <small style="color: #7f8c8d; display: block; margin-top: 5px;">
-                                Posición: (${Math.round(prediction.x)}, ${Math.round(prediction.y)}) 
-                                Tamaño: ${Math.round(prediction.width)}x${Math.round(prediction.height)}
-                            </small>
-                        </div>
-                        <span class="confidence">${Math.round(prediction.confidence * 100)}%</span>
-                    `;
-                    detectionList.appendChild(li);
+                // Group detections by class
+                const groupedDetections = {};
+                result.predictions.forEach(prediction => {
+                    if (!groupedDetections[prediction.class]) {
+                        groupedDetections[prediction.class] = [];
+                    }
+                    groupedDetections[prediction.class].push(prediction);
+                });
+                
+                // Display grouped detections
+                Object.entries(groupedDetections).forEach(([className, detections]) => {
+                    detections.forEach((prediction, index) => {
+                        const li = document.createElement('li');
+                        li.className = 'detection-item';
+                        li.innerHTML = `
+                            <div>
+                                <span class="class">${prediction.class} #${index + 1}</span>
+                                <small style="color: #7f8c8d; display: block; margin-top: 5px;">
+                                    Posición: (${Math.round(prediction.x)}, ${Math.round(prediction.y)}) 
+                                    Tamaño: ${Math.round(prediction.width)}x${Math.round(prediction.height)}
+                                </small>
+                            </div>
+                            <span class="confidence" style="background: ${getColorForClass(prediction.class)}">
+                                ${Math.round(prediction.confidence * 100)}%
+                            </span>
+                        `;
+                        detectionList.appendChild(li);
+                    });
                 });
                 
                 showSuccess(`¡Se detectaron ${result.predictions.length} elementos de PPE!`);
             } else {
                 detectionList.innerHTML = '<li class="detection-item">No se detectaron elementos de PPE en la imagen</li>';
+                showError('No se encontraron elementos de PPE en la imagen.');
             }
             
             // Scroll to results
@@ -599,11 +660,6 @@
                 successDiv.remove();
             }, 5000);
         }
-
-        // Auto-fill API key placeholder for demo
-        window.addEventListener('load', () => {
-            document.getElementById('apiKey').placeholder = 'Obtén tu API key en: app.roboflow.com/settings/api';
-        });
     </script>
 </body>
 </html>
