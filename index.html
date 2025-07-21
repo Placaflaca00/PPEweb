@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PPE Detection - SH17 Model</title>
+    <title>PPE Detection - Workflow Roboflow</title>
     <style>
         * {
             margin: 0;
@@ -286,7 +286,13 @@
     <div class="container">
         <div class="header">
             <h1>🦺 PPE Detection System</h1>
-            <p>Detección de Elementos de Protección Personal usando modelo SH17</p>
+            <p>Detección de Elementos de Protección Personal usando Workflow de Roboflow</p>
+        </div>
+        
+        <div style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+            <h4>✅ Tu workflow está desplegado y listo para usar</h4>
+            <p style="margin: 10px 0;">El modelo está ejecutándose como un workflow en: <code>detect-count-and-visualize</code></p>
+            <p style="margin: 0;">Usa el botón "Verificar Estado del Workflow" para confirmar que todo funciona correctamente.</p>
         </div>
         
         <div class="config-section">
@@ -294,12 +300,13 @@
             <div class="config-row">
                 <div class="config-item">
                     <label for="apiKey">API Key de Roboflow:</label>
+                    <!-- IMPORTANTE: Cambia esta API key por la tuya -->
                     <input type="password" id="apiKey" value="rf_kepWpLYHGyNzX6Xv62nRoMSgmvJ2" placeholder="Tu API key de Roboflow">
                     <span class="api-key-toggle" onclick="toggleApiKeyVisibility()">👁️</span>
                 </div>
                 <div class="config-item">
-                    <label for="modelUrl">Workspace/Proyecto/Versión:</label>
-                    <input type="text" id="modelUrl" value="2024-whf4s/ppe-detection-sh17/2" placeholder="workspace/proyecto/version">
+                    <label for="modelUrl">Endpoint del Workflow:</label>
+                    <input type="text" id="modelUrl" value="2024-whf4s/detect-count-and-visualize" placeholder="workspace/workflow-name">
                 </div>
             </div>
             <div class="config-row">
@@ -311,6 +318,11 @@
                     <label for="overlap">Overlap Threshold (%):</label>
                     <input type="number" id="overlap" value="30" min="0" max="100" step="5">
                 </div>
+            </div>
+            <div style="text-align: center; margin-top: 15px;">
+                <button onclick="testModelStatus()" style="background: #9b59b6; color: white; border: none; padding: 10px 20px; border-radius: 20px; cursor: pointer;">
+                    🔧 Verificar Estado del Workflow
+                </button>
             </div>
         </div>
         
@@ -374,6 +386,54 @@
             }
         }
 
+        // Test model deployment status
+        async function testModelStatus() {
+            const apiKey = document.getElementById('apiKey').value;
+            const workflowUrl = document.getElementById('modelUrl').value;
+            
+            if (!apiKey) {
+                showError('Por favor ingresa tu API key de Roboflow.');
+                return;
+            }
+            
+            showInfo('Verificando estado del workflow...');
+            
+            try {
+                const url = `https://serverless.roboflow.com/infer/workflows/${workflowUrl}`;
+                
+                // Test with a minimal image
+                const testImage = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        api_key: apiKey,
+                        inputs: {
+                            "image": {
+                                "type": "base64",
+                                "value": testImage
+                            }
+                        }
+                    })
+                });
+                
+                if (response.ok) {
+                    showSuccess('✅ ¡Workflow desplegado correctamente! Puedes usarlo.');
+                } else if (response.status === 404) {
+                    showError('❌ Workflow no encontrado. Verifica la URL.');
+                } else if (response.status === 401) {
+                    showError('❌ API key inválida o sin permisos.');
+                } else {
+                    showError(`❌ Error ${response.status}: ${response.statusText}`);
+                }
+            } catch (error) {
+                showError('❌ Error de conexión: ' + error.message);
+            }
+        }
+
         // Drag and drop functionality
         uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -419,7 +479,7 @@
 
         async function detectPPE() {
             const apiKey = document.getElementById('apiKey').value;
-            const modelUrl = document.getElementById('modelUrl').value;
+            const workflowUrl = document.getElementById('modelUrl').value;
             const confidence = parseInt(document.getElementById('confidence').value);
             const overlap = parseInt(document.getElementById('overlap').value);
 
@@ -440,26 +500,26 @@
                 const base64 = await fileToBase64(selectedImage);
                 const base64Data = base64.split(',')[1]; // Remove data:image/...;base64, prefix
                 
-                // Parse the model URL
-                const urlParts = modelUrl.split('/');
-                if (urlParts.length !== 3) {
-                    throw new Error('Formato de URL incorrecto. Debe ser: workspace/proyecto/version');
-                }
+                // Construct the workflow URL
+                const url = `https://serverless.roboflow.com/infer/workflows/${workflowUrl}`;
                 
-                const [workspace, project, version] = urlParts;
+                console.log('Making workflow request to:', url);
                 
-                // Construct the correct Roboflow URL
-                const url = `https://detect.roboflow.com/${workspace}/${project}/${version}`;
-                
-                console.log('Making request to:', url);
-                
-                // Make the request with the correct format
-                const response = await fetch(url + `?api_key=${apiKey}&confidence=${confidence}&overlap=${overlap}`, {
+                // Make the request in workflow format
+                const response = await fetch(url, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Content-Type': 'application/json',
                     },
-                    body: base64Data
+                    body: JSON.stringify({
+                        api_key: apiKey,
+                        inputs: {
+                            "image": {
+                                "type": "base64", 
+                                "value": base64Data
+                            }
+                        }
+                    })
                 });
 
                 console.log('Response status:', response.status);
@@ -472,9 +532,7 @@
                     if (response.status === 401) {
                         errorMessage += 'API key inválida o sin permisos';
                     } else if (response.status === 404) {
-                        errorMessage += 'Modelo no encontrado. Verifica workspace/proyecto/version';
-                    } else if (response.status === 405) {
-                        errorMessage += 'Método no permitido. El modelo puede no estar desplegado correctamente';
+                        errorMessage += 'Workflow no encontrado. Verifica la URL del workflow';
                     } else {
                         errorMessage += errorText;
                     }
@@ -482,9 +540,18 @@
                 }
 
                 const result = await response.json();
-                console.log('API Response:', result);
+                console.log('Workflow Response:', result);
                 
-                displayResults(result, base64);
+                // Process workflow results
+                if (result.outputs && result.outputs.length > 0) {
+                    const mainOutput = result.outputs[0];
+                    displayResults({
+                        predictions: mainOutput.predictions || [],
+                        image: mainOutput.output_image || mainOutput.visualized_image || mainOutput.image
+                    }, base64);
+                } else {
+                    throw new Error('Respuesta del workflow no válida');
+                }
 
             } catch (error) {
                 console.error('Error:', error);
@@ -540,12 +607,19 @@
         function getColorForClass(className) {
             const colors = {
                 'helmet': '#e74c3c',
+                'head': '#e74c3c',
                 'person': '#3498db',
                 'vest': '#2ecc71',
                 'mask': '#f39c12',
                 'gloves': '#9b59b6',
                 'goggles': '#1abc9c',
-                'boots': '#34495e'
+                'boots': '#34495e',
+                'hardhat': '#e74c3c',
+                'safety vest': '#2ecc71',
+                'safety helmet': '#e74c3c',
+                'no helmet': '#c0392b',
+                'no vest': '#27ae60',
+                'worker': '#3498db'
             };
             return colors[className.toLowerCase()] || '#95a5a6';
         }
@@ -573,6 +647,19 @@
                     ctx.drawImage(originalImg, 0, 0);
                 }
             };
+            
+            // If workflow provides an annotated image, show it instead
+            if (result.image) {
+                const canvas = document.getElementById('detectionCanvas');
+                const img = new Image();
+                img.onload = function() {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                };
+                img.src = `data:image/jpeg;base64,${result.image}`;
+            }
             
             // Display detection results
             const detectionList = document.getElementById('detectionList');
@@ -610,6 +697,13 @@
                 });
                 
                 showSuccess(`¡Se detectaron ${result.predictions.length} elementos de PPE!`);
+                
+                // Show total count
+                const totalDiv = document.createElement('div');
+                totalDiv.style.cssText = 'background: #3498db; color: white; padding: 15px; border-radius: 10px; margin: 20px 0; text-align: center; font-size: 1.2em;';
+                totalDiv.innerHTML = `<strong>Total de objetos detectados: ${result.predictions.length}</strong>`;
+                document.getElementById('detectionInfo').insertBefore(totalDiv, detectionList.parentNode);
+                
             } else {
                 detectionList.innerHTML = '<li class="detection-item">No se detectaron elementos de PPE en la imagen</li>';
                 showError('No se encontraron elementos de PPE en la imagen.');
@@ -659,6 +753,18 @@
             setTimeout(() => {
                 successDiv.remove();
             }, 5000);
+        }
+        
+        function showInfo(message) {
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'success';
+            infoDiv.style.background = '#3498db';
+            infoDiv.textContent = message;
+            document.querySelector('.upload-section').appendChild(infoDiv);
+            
+            setTimeout(() => {
+                infoDiv.remove();
+            }, 3000);
         }
     </script>
 </body>
