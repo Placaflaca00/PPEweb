@@ -280,7 +280,7 @@
             <div class="config-row">
                 <div class="config-item">
                     <label for="apiKey">API Key de Roboflow:</label>
-                    <input type="password" id="apiKey" placeholder="Ingresa tu API key aquí">
+                    <input type="password" id="apiKey" placeholder="rf_xxxxx... (tu API key de Roboflow)">
                 </div>
                 <div class="config-item">
                     <label for="modelUrl">Workspace/Proyecto:</label>
@@ -411,21 +411,44 @@
                 const base64 = await fileToBase64(selectedImage);
                 const base64Data = base64.split(',')[1]; // Remove data:image/...;base64, prefix
                 
-                // Construct the full URL
-                const url = `https://detect.roboflow.com/${modelUrl}?api_key=${apiKey}&confidence=${confidence}&overlap=${overlap}`;
+                // Check if it's a workflow deployment
+                const isWorkflow = modelUrl.includes('/') && !modelUrl.endsWith('/2');
                 
-                console.log('Making request to:', url);
-                console.log('Model URL:', modelUrl);
+                let response;
+                let url;
                 
-                // Make API request to Roboflow with better error handling
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: base64Data,
-                    mode: 'cors' // Explicitly set CORS mode
-                });
+                if (isWorkflow) {
+                    // Workflow endpoint
+                    url = `https://serverless.roboflow.com/infer/workflows/${modelUrl.replace('/2', '')}/custom-workflow`;
+                    console.log('Making workflow request to:', url);
+                    
+                    response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            api_key: apiKey,
+                            inputs: {
+                                "image": {"type": "base64", "value": base64Data}
+                            }
+                        }),
+                        mode: 'cors'
+                    });
+                } else {
+                    // Direct model endpoint
+                    url = `https://detect.roboflow.com/${modelUrl}?api_key=${apiKey}&confidence=${confidence}&overlap=${overlap}`;
+                    console.log('Making direct model request to:', url);
+                    
+                    response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: base64Data,
+                        mode: 'cors'
+                    });
+                }
 
                 console.log('Response status:', response.status);
 
@@ -437,7 +460,23 @@
 
                 const result = await response.json();
                 console.log('API Response:', result);
-                displayResults(result, base64);
+                
+                // Handle different response formats (workflow vs direct model)
+                let predictions = [];
+                let resultImage = null;
+                
+                if (result.outputs && result.outputs.length > 0) {
+                    // Workflow response format
+                    const output = result.outputs[0];
+                    predictions = output.predictions || [];
+                    resultImage = output.image;
+                } else if (result.predictions) {
+                    // Direct model response format
+                    predictions = result.predictions;
+                    resultImage = result.image;
+                }
+                
+                displayResults({ predictions, image: resultImage }, base64);
 
             } catch (error) {
                 console.error('Detailed Error:', error);
